@@ -695,6 +695,21 @@
   }
 
   .divider { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+/* Fixes layout shifting when results appear */
+  #result-display {
+    min-height: 115px; 
+    margin-top: 1.8rem;
+    padding: 1.2rem 1.5rem;
+    background: rgba(232, 106, 46, 0.1); 
+    border: 1.5px solid var(--orange);
+    border-radius: 12px;
+  }
+
+  /* Ensures the grid doesn't wobble when scrolling */
+  .rates-grid {
+    scrollbar-gutter: stable;
+  }
 </style>
 </head>
 <body>
@@ -1168,13 +1183,19 @@ function convert() {
   const amount = parseFloat(document.getElementById('amount').value) || 0;
   const from = document.getElementById('from-currency').value;
   const to = document.getElementById('to-currency').value;
+  
   if (!allRates[from] || !allRates[to]) return;
-  const inUSD = amount / allRates[from];
-  const result = inUSD * allRates[to];
+
+  // Logic: Amount / (From Rate relative to USD) * (To Rate relative to USD)
+  const result = (amount / allRates[from]) * allRates[to];
   const rate = allRates[to] / allRates[from];
-  document.getElementById('result-display').style.display = 'block';
+
+  const display = document.getElementById('result-display');
+  display.style.display = 'block';
   document.getElementById('result-main').textContent = `${formatRate(result)} ${to}`;
-  document.getElementById('result-sub').textContent = `1 ${from} = ${formatRate(rate)} ${to}  •  1 ${to} = ${formatRate(1/rate)} ${from}`;
+  document.getElementById('result-sub').textContent = `1 ${from} = ${formatRate(rate)} ${to}`;
+  
+  // Update the stat pills to show the current pair
   document.getElementById('pill-rate').textContent = formatRate(rate);
   document.getElementById('pill-pair').textContent = `${from} → ${to}`;
 }
@@ -1201,30 +1222,44 @@ function setRange(days, btn) {
 async function loadChart() {
   const base = document.getElementById('chart-base')?.value || 'USD';
   const quote = document.getElementById('chart-quote')?.value || 'EUR';
+
+  // FIX: If user picks USD to USD, clear the chart and stop.
+  if (base === quote) {
+    if (mainChart) mainChart.destroy();
+    document.getElementById('chart-stats').innerHTML = "<span>Select two different currencies to view history.</span>";
+    return;
+  }
+
   const end = new Date();
   const start = new Date();
   start.setDate(start.getDate() - chartRange);
   const fmt = d => d.toISOString().split('T')[0];
+
   try {
     const res = await fetch(`https://api.frankfurter.app/${fmt(start)}..${fmt(end)}?base=${base}&symbols=${quote}`);
+    if (!res.ok) throw new Error("API Error"); // Prevents glitches on empty data
+    
     const data = await res.json();
     const labels = Object.keys(data.rates).sort();
     const values = labels.map(d => data.rates[d][quote]);
+    
     buildMainChart(labels, values, base, quote);
     buildRangeChart(labels, values, quote);
     buildChangeChart(labels, values);
-    // Stats
+
     const min = Math.min(...values), max = Math.max(...values);
     const first = values[0], last = values[values.length-1];
     const pct = ((last-first)/first*100).toFixed(2);
-    const sign = pct >= 0 ? '+' : '';
     document.getElementById('chart-stats').innerHTML = `
       <span>📉 Low: <strong>${formatRate(min)}</strong></span>
       <span>📈 High: <strong>${formatRate(max)}</strong></span>
-      <span>🔄 Change: <strong style="color:${pct>=0?'var(--teal)':'var(--red)'}">${sign}${pct}%</strong></span>
+      <span>🔄 Change: <strong style="color:${pct>=0?'var(--teal)':'var(--red)'}">${pct >= 0 ? '+' : ''}${pct}%</strong></span>
       <span>📊 Latest: <strong>${formatRate(last)}</strong></span>
     `;
-  } catch(e) { console.error(e); }
+  } catch(e) { 
+    console.error(e); 
+    document.getElementById('chart-stats').innerHTML = "<span>Unable to load chart for this range.</span>";
+  }
 }
 
 function buildMainChart(labels, values, base, quote) {
